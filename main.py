@@ -71,15 +71,26 @@ collision_sound = pygame.mixer.Sound('sounds/collision.wav')
 getting_damage_sound = pygame.mixer.Sound('sounds/getting damage.wav')
 score_sound = pygame.mixer.Sound('sounds/score.mp3')
 
-bg_music = game_music
-
 def play_sound(sound, volume, loop=0):
     sound.set_volume(volume)
     sound.play(loop)
 
-play_sound(bg_music, 0.05, -1)
+play_sound(menu_music, 0.05, -1)
+
+def switch_bg_music(bg_music, loop=-1):
+    pygame.mixer.stop()
+    play_sound(bg_music, 0.05, loop)
 
 #images
+bg_image = pygame.image.load('images/bg.png')
+bg_image = pygame.transform.scale(bg_image, (GAME_WIDTH, GAME_HEIGHT))
+
+player_image = pygame.image.load('images/player.png')
+player_image = pygame.transform.scale(player_image, (40, 40))
+
+enemy_image = pygame.image.load('images/enemy.png')
+enemy_image = pygame.transform.scale(enemy_image, (40, 40))
+
 shooting_image = pygame.image.load('images/shooting.png')
 shooting_image = pygame.transform.scale(shooting_image, (30, 30))
 
@@ -90,6 +101,7 @@ pygame.mouse.set_visible(False)
 
 blood_image = pygame.image.load('images/blood.png')
 blood_image = pygame.transform.scale(blood_image, (GAME_WIDTH, GAME_HEIGHT))
+
 is_blood_drawn = False
 
 hp_kit_image = pygame.image.load('images/hp kit.png')
@@ -141,15 +153,16 @@ player_spawn_y = (GAME_HEIGHT/2)-20
 
 #general character class
 class Character(pygame.Rect):
-    def __init__(self, color, hp, damage, speed, x, y):
+    def __init__(self, image, hp, damage, speed, x, y):
         super().__init__(x, y, 40, 40)
-        self.color = color
+        self.image = image
         self.hp = hp
         self.damage = damage
         self.speed = speed
+        self.original_image = image
 
     def draw(self):
-        pygame.draw.rect(game_window, self.color, self)
+        game_window.blit(self.image, (self.x, self.y))
 
     def show_health_bar(self, x, y, K):
         width = K * self.hp
@@ -159,8 +172,8 @@ class Character(pygame.Rect):
         self.hp -= damage
 
 class Player(Character):
-    def __init__(self, color, hp, damage, speed, x, y):
-        super().__init__(color, hp, damage, speed, x, y)
+    def __init__(self, image, hp, damage, speed, x, y):
+        super().__init__(image, hp, damage, speed, x, y)
         self.last_shot_time = 0
         self.cd = 200 # 200 ms time gap between each bullet shooting 
                       # "cooldown" time
@@ -204,9 +217,16 @@ class Player(Character):
         if self.hp <= 0:
             global game_over
             game_over = True
-            play_sound(game_over_music, 0.5)
+            switch_bg_music(game_over_music, 0)
+
+    def follow_mouse_dir(self):
+        direction = pygame.Vector2(pygame.mouse.get_pos()) - pygame.Vector2(self.center)
+        rad, angle = direction.as_polar()
+        rotated_image = pygame.transform.rotate(self.original_image, -angle)
+        self.image = rotated_image
+        self.rect = self.image.get_rect(center=self.center)
             
-player = Player(color="blue", 
+player = Player(image=player_image, 
                 hp=100, 
                 damage=25, 
                 speed=5,
@@ -274,8 +294,8 @@ class Loot(pygame.Rect):
 
 enemies = []
 class Enemy(Character):
-    def __init__(self, color, hp, damage, speed, x, y):
-        super().__init__(color, hp, damage, speed, x, y)
+    def __init__(self, image, hp, damage, speed, x, y):
+        super().__init__(image, hp, damage, speed, x, y)
         self.pos = pygame.Vector2(x, y)
         self.knockback_frames = 0
         self.can_attack = True
@@ -340,8 +360,15 @@ class Enemy(Character):
                 case "n": # nothing
                     pass
 
+    def follow_player_dir(self):
+        direction = pygame.Vector2(player.center) - pygame.Vector2(self.center)
+        rad, angle = direction.as_polar()
+        rotated_image = pygame.transform.rotate(self.original_image, -angle)
+        self.image = rotated_image
+        self.rect = self.image.get_rect(center=self.center)
+
 def create_enemy():
-    enemy = Enemy(color="red",
+    enemy = Enemy(image=enemy_image,
                   hp=50,
                   damage=25,
                   speed=3,
@@ -354,6 +381,7 @@ def handle_enemies():
     for enemy in enemies:
         enemy.draw()
         enemy.chase(player)
+        enemy.follow_player_dir()
         enemy.bite(player)
         enemy.show_health_bar(enemy.x - 10, enemy.y - 20, 1.2)
 
@@ -404,6 +432,62 @@ def upgrade_best_score():
             best_score = kills
             file.write(str(best_score))
 
+def show_menu():
+    restart_game()
+    start_btn.draw()
+
+    global is_in_menu, game_over
+    if start_btn.get_clicked():
+        switch_bg_music(game_music)
+        is_in_menu = False
+        game_over = False
+
+    show_text("MAN-SURVIVOR", "gold", 45, GAME_HEIGHT/2 - 190, 50)
+    show_text("Version 1.0.4", "darkred", 160, GAME_HEIGHT/2 - 120, 30)
+    player.show_health_bar(player.x - 10, player.y - 32, 0.6)
+    player.show_bullet_bar(player.x - 10, player.y - 20)
+    player.follow_mouse_dir()
+    show_text(str(int(kills)), "red", player.x + 55, player.y - 35, 20)
+    player.draw()
+    replace_pointer(basic_cursor_image)
+
+def show_game():
+    render_bullets()
+    handle_loot()
+    player.draw()
+    player.follow_mouse_dir()
+    handle_enemies()
+    
+    player.move()
+    player.attack()
+    player.get_killed()
+
+    player.show_health_bar(player.x - 10, player.y - 32, 0.6)
+    player.show_bullet_bar(player.x - 10, player.y - 20)
+    show_text(str(int(kills)), "red", player.x + 55, player.y - 35, 20)
+
+    show_text(get_current_time(), "black", 10, 10, 20)
+    show_text(timer_text, "black", 10, 30, 20)
+
+    replace_pointer(shooting_image)
+
+def show_game_over():
+    menu_btn.draw()
+    global is_in_menu, game_over
+
+    if menu_btn.get_clicked():
+        switch_bg_music(menu_music)
+        is_in_menu = True
+        game_over = True
+
+    show_text("GAME OVER", "red", 40, GAME_HEIGHT/2 - 150, 70)
+    show_text("Hit 'Space' to start new round...", "green", 30, GAME_HEIGHT/2 - 65, 30)
+    show_text(timer_text, "black", 40, GAME_HEIGHT/2 - 20, 20)
+    show_text(f"Kills: {kills}", "black", 40, GAME_HEIGHT/2, 20)
+    show_text(f"Best score: {best_score}", "black", 40, GAME_HEIGHT/2 + 20, 20)
+    replace_pointer(basic_cursor_image)
+    upgrade_best_score()
+
 spawn_enemy = pygame.USEREVENT
 pygame.time.set_timer(spawn_enemy, spawning_delay)
 
@@ -426,58 +510,18 @@ while running:
         if event.type == update_timer_event and not is_in_menu and not game_over:
             update_timer()
         if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE and game_over and not is_in_menu:
+            switch_bg_music(game_music)
             restart_game()
 
-    game_window.fill('white')
+    game_window.blit(bg_image, (0, 0))
 
     #print(f'enemies: {len(enemies)} and bullets: {len(bullets)}')
     if not game_over and not is_in_menu:
-        bg_music = game_music
-        player.move()
-        player.attack()
-        render_bullets()
-        handle_enemies()
-        handle_loot()
-        player.draw()
-        player.get_killed()
-        player.show_health_bar(player.x - 10, player.y - 32, 0.6)
-        player.show_bullet_bar(player.x - 10, player.y - 20)
-        replace_pointer(shooting_image)
-        show_text(str(int(kills)), "red", player.x + 55, player.y - 35, 20)
-        show_text(get_current_time(), "black", 10, 10, 20)
-        show_text(timer_text, "black", 10, 30, 20)
+        show_game()
     elif game_over and not is_in_menu:
-        bg_music = game_over_music
-        menu_btn.draw()
-
-        if menu_btn.get_clicked():
-            is_in_menu = True
-            game_over = True
-
-        show_text("GAME OVER", "red", 40, GAME_HEIGHT/2 - 150, 70)
-        show_text("Hit 'Space' to start new round...", "green", 30, GAME_HEIGHT/2 - 65, 30)
-        show_text(timer_text, "black", 40, GAME_HEIGHT/2 - 20, 20)
-        show_text(f"Kills: {kills}", "black", 40, GAME_HEIGHT/2, 20)
-        show_text(f"Best score: {best_score}", "black", 40, GAME_HEIGHT/2 + 20, 20)
-        replace_pointer(basic_cursor_image)
-
-        upgrade_best_score()
+        show_game_over()
     else:
-        bg_music = menu_music
-        restart_game()
-        start_btn.draw()
-
-        if start_btn.get_clicked():
-            is_in_menu = False
-            game_over = False
-
-        show_text("CUBE-SURVIVOR", "gold", 40, GAME_HEIGHT/2 - 190, 50)
-        show_text("Version 1.0.3", "darkred", 160, GAME_HEIGHT/2 - 120, 30)
-        player.show_health_bar(player.x - 10, player.y - 32, 0.6)
-        player.show_bullet_bar(player.x - 10, player.y - 20)
-        show_text(str(int(kills)), "red", player.x + 55, player.y - 35, 20)
-        player.draw()
-        replace_pointer(basic_cursor_image)
+        show_menu()
 
     pygame.display.update()
     clock.tick(fps)
